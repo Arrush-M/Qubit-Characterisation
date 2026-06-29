@@ -1,28 +1,27 @@
 import sys
 import numpy as np
 from zhinst.qcodes import HDAWG
+from zhinst.toolkit import Waveforms
 
-class HDAWG_SG:
+class HDAWG:
     """
     zhinst-qcodes wrapper for Zurich Instruments HDAWG.
     Simplifies the interface to the device.
     """
     def __init__(self, device_serial: str, host: str = "localhost"):
-        # 1. Connect to the HDAWG via QCoDeS
+
+        # Connect to the HDAWG via QCoDeS
+
         print(f"Connecting to HDAWG {device_serial} on {host}...")
+        
         self.sg = HDAWG(device_serial, host) # not directly "DEV8488" for portability
         
-        # 2. Setup AWG to not need LabOne API
-        self.sg.awgs[0].set_sequence_params(
-            sequence_type="Simple",
-            period=20e-6,
-            repetitions=1000
-        )
-        
-        # 3. Initialize state variables
+        # Initialize state variables
         self.freq = None
         self.power_dbm = None
         self.phase = 0.0 # mostly relevant for CW
+        self._compiled_wfm_len = 0
+        self._compiled_dual = False
 
     @staticmethod
     def dbm_to_vp(dbm: float) -> float:
@@ -31,7 +30,6 @@ class HDAWG_SG:
 
     # I would keep set_cw_tone and set_power as part of prepare/send waveform, but for legacy (sg.py) reasons kept separate
     def set_cw_tone(self, freq: float): 
-        """Sets the Continuous Wave frequency."""
         self.freq = freq
         print(f"--- HDAWG Frequency set to {self.freq/1e9:.4f} GHz")
         
@@ -44,33 +42,61 @@ class HDAWG_SG:
         self.power_dbm = power_dbm
         print(f"--- HDAWG Power set to {self.power_dbm} dBm")
 
-    def prepare_cw_waveform(self):
-        """Internal helper to compile and push the array memory into the HDAWG."""
+    def _ensure_sequencer_compiled(self, length: int, dual: bool = False):
+
+        # Bypasses the slow compilation phase if waveform remains same, as advised in zhinst-toolkit documentation
+
+        if self._compiled_wfm_len == length and self._compiled_dual == dual:
+            return 
+
+        print(f"[{self.sg.name}] Compiling AWG FPGA code (This happens rarely)...")
+        
+        if not dual:
+            seqc_program = f"""
+            wave w1 = placeholder({length});      // Reserve memory for a 1-Ch shape
+            assignWaveIndex(1, w1, 0);          // Link w1 to memory slot 0
+            while (true) {{ playWave(1, w1); }}    // Replaces repetitions/infinite loop
+            """ # 1 channel if dual=False
+        else:
+            seqc_program = f"""
+            wave w = placeholder({length}, true, false);
+            assignWaveIndex(1, 2, w, 0);                
+            while (true) {{ playWave(1, 2, w); }}
+            """ # 2 channels if dual=True
+
+        self.sg.awgs[0].load_sequencer_program(seqc_program)
+        
+        # Update cache tracking
+        self._compiled_wfm_len = length
+        self._compiled_dual = dual
+
+    def _prepare_cw_waveform(self):
         if self.freq is None or self.power_dbm is None:
             raise ValueError("Frequency and Power must be set before generating CW waveform.")
-
-        # Rescale wave to desired power    
+        
+        # Rescaling constants 
         target_vp = self.dbm_to_vp(self.power_dbm)
         self.sg.sigouts[0].range(target_vp)
         actual_range = self.sg.sigouts[0].range()
         
-        # Re-initialize the HDAWG's QCoDeS internal array queue
-        self.sg.awgs[0].reset_queue()
-        
-        t = np.linspace(0, 20e-6, 8000)
-        w = np.cos(2 * np.pi * self.freq * t + self.phase) * (target_vp / actual_range)
-        
-        # Upload to AWG queue and compile
-        self.sg.awgs[0].queue_waveform(w, [])
-        self.sg.awgs[0].compile_and_upload_waveforms()
+        wfm_length = 8000
+        t = np.linspace(0, 20e-6, wfm_length)
 
-    def prepare_arbitrary_waveforms(self, wave1: np.ndarray, wave2: np.ndarray, power_dbm: float, max_power: float = 0):
+        w_scaled = np.sin(2 * np.pi * self.freq * t + self.phase) * (target_vp / actual_range)
+
+        self._ensure_sequencer_compiled(wfm_length, dual=False)
+
+        waveforms = Waveforms()
+        waveforms.assign_waveform(0, w_scaled)  # Push w_scaled to hardware memory slot 0
+        # wave2 argument not required here
+        self.sg.awgs[0].write_to_waveform_memory(waveforms)
+
+    def _prepare_arbitrary_waveforms(self, wave1: str, wave2: str, power_dbm: float, max_power: float = 0):
         """
-        Standalone method ported from procedural script to upload custom arbitrary waveforms.
         Future-proofing for time-domain/qubit measurements.
         """
-        # For single complex waveform, HDAWG automatically splits into channels 1 and 2. 
-        # wave1=[complex], wave2=[] will simplify to wave1=[Re(complex)], wave2=[Im(complex)]. 
+        # For single complex waveform, HDAWG should automatically split into channels 1 and 2. 
+        # e.g wave1=[complex], wave2=[] will simplify to wave1=[Re(complex)], wave2=[Im(complex)]. 
 
         if power_dbm >= max_power: 
             print(f"SAFETY TRIGGERED: Power {power_dbm} dBm is >= {max_power} dBm. Aborting.")
@@ -80,14 +106,18 @@ class HDAWG_SG:
         self.sg.sigouts[0].range(target_vp)
         actual_range = self.sg.sigouts[0].range()
         
-        self.sg.awgs[0].reset_queue()
+        if len(wave1) != len(wave2):
+            raise ValueError("Lengths of channel 1 and channel 2 waves must be identical.")
         
-        # Scale to set the correct amplitude
-        w1_scaled = wave1 * (target_vp / actual_range)
-        w2_scaled = wave2 * (target_vp / actual_range)
+        self._ensure_sequencer_compiled(len(wave1), dual=True)
         
-        self.sg.awgs[0].queue_waveform(w1_scaled, w2_scaled)
-        self.sg.awgs[0].compile_and_upload_waveforms()
+        scaled_w1 = wave1 * (target_vp / actual_range)
+        scaled_w2 = wave2 * (target_vp / actual_range)
+        
+        waveforms = Waveforms()
+        waveforms.assign_waveform(0, scaled_w1, scaled_w2)
+        
+        self.sg.awgs[0].write_to_waveform_memory(waveforms)
         
         print("\n--- HDAWG Custom Waveform Output: ON")
 
@@ -103,4 +133,5 @@ class HDAWG_SG:
         self.sg.awgs[0].enable(False)
         print("\n--- HDAWG Output: OFF")
         
+    
     
