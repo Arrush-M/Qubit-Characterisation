@@ -25,7 +25,7 @@ def generate_slepian(tlist, NW=4, target_area=np.pi):
     area = np.trapezoid(envelope, dx=dt)
     return envelope * (target_area / area)
 
-def apply_hd_drag(I_t, dt, alpha, delta=0.0):
+def apply_hd_drag(I_t, dt, alpha):
     """
     Applies Higher-Derivative (HD) DRAG to a base envelope I(t).
     
@@ -42,14 +42,14 @@ def apply_hd_drag(I_t, dt, alpha, delta=0.0):
     # Calculate numerical derivatives
     dI_dt = np.gradient(I_t, dt)
     ddI_dt2 = np.gradient(dI_dt, dt)
+    dddI_dt3 = np.gradient(ddI_dt2, dt)
     
     # 1st-Order DRAG Q-channel correction (prevents leakage to |2>)
-    Q_corr = - (1.0 / alpha) * dI_dt
+    Q_corr = - (1.0 / alpha) * dI_dt - (1.0 / (alpha**2)) * dddI_dt3
     
     # HD-DRAG I-channel correction (corrects phase accumulation and higher-order errors)
-    # The term (delta / alpha) accounts for detuning corrections.
     # The second derivative term accounts for dynamic Stark shifts.
-    I_corr = I_t + (delta / alpha) * I_t - (1.0 / (2.0 * alpha**2)) * ddI_dt2
+    I_corr = I_t - (1.0 / (alpha**2)) * ddI_dt2 # Swap 
     
     return I_corr, Q_corr
 
@@ -59,7 +59,7 @@ def apply_hd_drag(I_t, dt, alpha, delta=0.0):
 # =====================================================================
 
 N = 3                   # Truncate transmon to 3 levels: |0>, |1>, |2>
-gate_time = 6.0        # ns
+gate_time = 20.0        # ns
 num_points = 1000       # AWG sample points
 tlist = np.linspace(0, gate_time, num_points)
 dt = tlist[1] - tlist[0]
@@ -82,7 +82,7 @@ n_th = 1.0 / (np.exp(exponent) - 1.0)
 
 # Choose Pulse Shape: 'gaussian' or 'slepian'
 PULSE_SHAPE = 'gaussian' 
-USE_DRAG = False
+USE_DRAG = True
 
 
 # =====================================================================
@@ -100,7 +100,7 @@ elif PULSE_SHAPE == 'slepian':
 
 # 3b. Apply HD-DRAG
 if USE_DRAG:
-    I_t, Q_t = apply_hd_drag(base_I, dt, alpha=alpha, delta=0.0)
+    I_t, Q_t = apply_hd_drag(base_I, dt, alpha=alpha)
 else:
     I_t = base_I
     Q_t = np.zeros_like(tlist)
