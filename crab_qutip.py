@@ -2,12 +2,13 @@ import numpy as np
 import qutip as qt
 import qutip_qoc as qoc
 from scipy.constants import h, k
+import time
 np.random.seed(5040) # For reproducibility
 
 # =====================================================================
 # 1. Physics & Hardware System Parameters
 # =====================================================================
-N = 3
+N = 5
 gate_time = 20.0
 num_tslots = 200
 tlist = np.linspace(0, gate_time, num_tslots)
@@ -35,6 +36,8 @@ n_op = ad * a
 P0 = qt.basis(N, 0) * qt.basis(N, 0).dag()
 P1 = qt.basis(N, 1) * qt.basis(N, 1).dag()
 P2 = qt.basis(N, 2) * qt.basis(N, 2).dag()
+P3 = qt.basis(N, 3) * qt.basis(N, 3).dag()
+P4 = qt.basis(N, 4) * qt.basis(N, 4).dag()
 
 H_drift = 0.5 * alpha * ad * ad * a * a
 H_I = 0.5 * (a + ad)
@@ -62,11 +65,13 @@ guess_Q = np.zeros_like(tlist)      # Q channel starts at zero
 # 4. CRAB Optimization
 # =====================================================================
 print("\nRunning CRAB optimization...")
-
+t0 = time.time()
 U_targ_matrix = np.array([
-    [0, 1, 0],
-    [1, 0, 0],
-    [0, 0, 1]
+    [0, 1, 0, 0, 0],
+    [1, 0, 0, 0, 0],
+    [0, 0, 1, 0, 0],
+    [0, 0, 0, 1, 0],
+    [0, 0, 0, 0, 1]
 ])
 U_targ = qt.Qobj(U_targ_matrix)
 U_0 = qt.qeye(N)
@@ -91,6 +96,7 @@ res_crab = qoc.optimize_pulses(
 )
 
 print(f"Optimization finished. Final Ideal Infidelity: {res_crab.infidelity:.2e}")
+print(f"Time taken for optimization: {time.time() - t0:.3f} seconds")
 
 # qutip-qoc returns the final pulses here
 I_t = res_crab.optimized_controls[0]
@@ -115,11 +121,13 @@ c_ops = [
 ]
 
 psi0 = qt.basis(N, 0)
-result = qt.mesolve(H_noisy, psi0, tlist, c_ops, e_ops=[P0, P1, P2])
+result = qt.mesolve(H_noisy, psi0, tlist, c_ops, e_ops=[P0, P1, P2, P3, P4])
 
 pop_0 = result.expect[0]
 pop_1 = result.expect[1]
 pop_2 = result.expect[2]
+pop_3 = result.expect[3]
+pop_4 = result.expect[4]
 
 
 # =====================================================================
@@ -137,8 +145,10 @@ ax1.legend()
 ax1.grid(True, alpha=0.3)
 
 ax2.plot(tlist, pop_0, label=r'Ground State $|0\rangle$', color='black', lw=2)
-ax2.plot(tlist, pop_1, label=r'Excited State $|1\rangle$', color='green', lw=2)
-ax2.plot(tlist, pop_2, label=r'Leakage State $|2\rangle$', color='purple', lw=2)
+ax2.plot(tlist, pop_1, label=r'Excited State $|1\rangle$', color='brown', lw=2)
+ax2.plot(tlist, pop_2, label=r'Leakage State $|2\rangle$', color='red', lw=2)
+ax2.plot(tlist, pop_3, label=r'Leakage State $|3\rangle$', color='orange', lw=2)
+ax2.plot(tlist, pop_4, label=r'Leakage State $|4\rangle$', color='yellow', lw=2)
 ax2.set_xlabel("Time (ns)")
 ax2.set_ylabel("Population")
 ax2.legend()
@@ -150,3 +160,5 @@ plt.show()
 print("\n--- Final Open-System (Thermal + T1 + Tphi) Results ---")
 print(f"Final |1> Fidelity: {pop_1[-1]:.5f}")
 print(f"Final |2> Leakage:  {pop_2[-1]:.5e}")
+print(f"Final |3> Leakage:  {pop_3[-1]:.5e}")
+print(f"Final |4> Leakage:  {pop_4[-1]:.5e}")

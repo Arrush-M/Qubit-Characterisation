@@ -3,6 +3,7 @@ import qutip as qt
 import matplotlib.pyplot as plt
 from scipy.signal.windows import dpss
 from scipy.constants import h, k
+import time
 
 # =====================================================================
 # 1. Pulse Envelope Definitions
@@ -44,12 +45,11 @@ def apply_hd_drag(I_t, dt, alpha):
     ddI_dt2 = np.gradient(dI_dt, dt)
     dddI_dt3 = np.gradient(ddI_dt2, dt)
     
-    # 1st-Order DRAG Q-channel correction (prevents leakage to |2>)
-    Q_corr = - (1.0 / alpha) * dI_dt - (1.0 / (alpha**2)) * dddI_dt3
+    # 1st and 3rd order Q-channel correction
+    Q_corr = - (0.25 / alpha) * dI_dt - (0.25 / (alpha**2)) * dddI_dt3
     
-    # HD-DRAG I-channel correction (corrects phase accumulation and higher-order errors)
-    # The second derivative term accounts for dynamic Stark shifts.
-    I_corr = I_t - (1.0 / (alpha**2)) * ddI_dt2 # Swap 
+    # 2nd order I-channel correction 
+    I_corr = I_t - (0.25 / (alpha**2)) * ddI_dt2 # Swap 
     
     return I_corr, Q_corr
 
@@ -58,8 +58,8 @@ def apply_hd_drag(I_t, dt, alpha):
 # 2. Physics & System Parameters
 # =====================================================================
 
-N = 3                   # Truncate transmon to 3 levels: |0>, |1>, |2>
-gate_time = 20.0        # ns
+N = 5                   # Truncate transmon to 5 levels: |0>, |1>, |2>, |3>, |4> because 3rd order HD-DRAG
+gate_time = 10.0        # ns
 num_points = 1000       # AWG sample points
 tlist = np.linspace(0, gate_time, num_points)
 dt = tlist[1] - tlist[0]
@@ -119,6 +119,8 @@ n_op = ad * a
 P0 = qt.basis(N, 0) * qt.basis(N, 0).dag()
 P1 = qt.basis(N, 1) * qt.basis(N, 1).dag()
 P2 = qt.basis(N, 2) * qt.basis(N, 2).dag()
+P3 = qt.basis(N, 3) * qt.basis(N, 3).dag()
+P4 = qt.basis(N, 4) * qt.basis(N, 4).dag()
 
 # 4a. Hamiltonians
 # Drift Hamiltonian: Transmon Anharmonicity
@@ -154,13 +156,15 @@ psi0 = qt.basis(N, 0)
 
 print(f"Simulating {gate_time} ns X-Gate using {PULSE_SHAPE.capitalize()} pulse...")
 if USE_DRAG: print("HD-DRAG is Active.")
-
+t0 = time.time()
 # e_ops measures the population of each state over time
-result = qt.mesolve(H_total, psi0, tlist, c_ops, e_ops=[P0, P1, P2])
+result = qt.mesolve(H_total, psi0, tlist, c_ops, e_ops=[P0, P1, P2, P3, P4])
 
 pop_0 = result.expect[0]
 pop_1 = result.expect[1]
-pop_2 = result.expect[2] # Leakage!
+pop_2 = result.expect[2]
+pop_3 = result.expect[3]
+pop_4 = result.expect[4]
 
 
 # =====================================================================
@@ -179,8 +183,10 @@ ax1.grid(True, alpha=0.3)
 
 # Plot 2: Transmon State Populations
 ax2.plot(tlist, pop_0, label=r'Ground State $|0\rangle$', color='black', lw=2)
-ax2.plot(tlist, pop_1, label=r'Excited State $|1\rangle$', color='green', lw=2)
-ax2.plot(tlist, pop_2, label=r'Leakage State $|2\rangle$', color='purple', lw=2)
+ax2.plot(tlist, pop_1, label=r'Excited State $|1\rangle$', color='brown', lw=2)
+ax2.plot(tlist, pop_2, label=r'Leakage State $|2\rangle$', color='red', lw=2)
+ax2.plot(tlist, pop_3, label=r'3rd Excited State $|3\rangle$', color='orange', lw=2)
+ax2.plot(tlist, pop_4, label=r'4th Excited State $|4\rangle$', color='yellow', lw=2)
 ax2.set_xlabel("Time (ns)")
 ax2.set_ylabel("Population")
 ax2.legend()
@@ -192,3 +198,6 @@ plt.show()
 # Final Gate Metrics
 print(f"Final |1> Fidelity:  {pop_1[-1]:.5f}")
 print(f"Final |2> Leakage:   {pop_2[-1]:.5e}")
+print(f"Final |3> Leakage:   {pop_3[-1]:.5e}")
+print(f"Final |4> Leakage:   {pop_4[-1]:.5e}")
+print(f"Simulation Time: {time.time() - t0:.3f} seconds")
