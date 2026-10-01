@@ -3,8 +3,7 @@ import qutip as qt
 import qutip_qoc as qoc
 from scipy.constants import h, k
 import time
-np.random.seed(5040) # For reproducibility
-
+np.random.seed(2458567575)
 # =====================================================================
 # 1. Physics & Hardware System Parameters
 # =====================================================================
@@ -58,7 +57,7 @@ center = gate_time / 2.0
 guess_I = np.exp(-0.5 * ((tlist - center) / sigma)**2)
 area = np.trapezoid(guess_I, dx=dt)
 guess_I = guess_I * (np.pi / area)  # Calibrate to Pi area
-guess_Q = np.zeros_like(tlist)      # Q channel starts at zero
+guess_Q = 0.1 * guess_I  # Nonzero Q for CRAB to optimize
 
 
 # =====================================================================
@@ -158,6 +157,7 @@ plt.tight_layout()
 plt.show()
 
 print("\n--- Final Open-System (Thermal + T1 + Tphi) Results ---")
+print(f"Final |0> Retention: {pop_0[-1]:.5e}")
 print(f"Final |1> Fidelity: {pop_1[-1]:.5f}")
 print(f"Final |2> Leakage:  {pop_2[-1]:.5e}")
 print(f"Final |3> Leakage:  {pop_3[-1]:.5e}")
