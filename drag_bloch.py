@@ -149,6 +149,10 @@ sx, sy, sz = qt.sigmax(), qt.sigmay(), qt.sigmaz()
 pts_nodrag = [qt.expect(sx, states_nodrag), qt.expect(sy, states_nodrag), qt.expect(sz, states_nodrag)]
 pts_drag = [qt.expect(sx, states_drag), qt.expect(sy, states_drag), qt.expect(sz, states_drag)]
 
+print(f"Final State (Non-DRAG): {states_nodrag[-1]}")
+print(f"Final State (DRAG): {states_drag[-1]}")
+print(f"Off diagonal magnitude (Non-DRAG): {np.abs(states_nodrag[-1][0,1])}")
+print(f"Off diagonal magnitude (DRAG): {np.abs(states_drag[-1][0,1])}")
 # Setup Bloch sphere
 b = Bloch()
 
