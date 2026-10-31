@@ -8,13 +8,18 @@ import time
 # =====================================================================
 N = 5
 gate_time = 20.0
-num_tslots = 200
+num_tslots = 200  # Number of time slots for the pulse
 tlist = np.linspace(0, gate_time, num_tslots)
 dt = tlist[1] - tlist[0]
 
-qubit_freq_Hz = 5.0e9
-alpha_ghz = -0.300
-alpha = 2 * np.pi * alpha_ghz  
+qubit_freq_Hz = 5.1e9
+alpha_ghz = -0.30335 # Hard-coded for E_J/E_C = 50
+beta_ghz  = -0.03559
+gamma_ghz = -0.07155
+
+alpha = 2 * np.pi * alpha_ghz
+beta  = 2 * np.pi * beta_ghz
+gamma = 2 * np.pi * gamma_ghz
 
 T_eff = 0.050                
 T1 = 50000.0                 
@@ -37,7 +42,11 @@ P2 = qt.basis(N, 2) * qt.basis(N, 2).dag()
 P3 = qt.basis(N, 3) * qt.basis(N, 3).dag()
 P4 = qt.basis(N, 4) * qt.basis(N, 4).dag()
 
-H_drift = 0.5 * alpha * ad * ad * a * a
+H_drift = (
+    (alpha / 2.0)   * ad**2 * a**2 +
+    (beta / 6.0)    * ad**3 * a**3 +
+    (gamma / 24.0)  * ad**4 * a**4
+)
 H_I = 0.5 * (a + ad)
 H_Q = 0.5 * 1j * (ad - a)
 
@@ -64,17 +73,15 @@ fids = []  # To store the fidelity errors for each optimization
 for i in range(10):
     print("\nRunning CRAB optimization...")
     t0 = time.time()
-    U_targ_matrix = np.array([
-        [0, 1, 0, 0, 0],
-        [1, 0, 0, 0, 0],
-        [0, 0, 1, 0, 0],
-        [0, 0, 0, 1, 0],
-        [0, 0, 0, 0, 1]
-    ])
-    U_targ = qt.Qobj(U_targ_matrix)
-    U_0 = qt.qeye(N)
+    psi0_init = qt.basis(N, 0)
+    psi0_targ = qt.basis(N, 1)
 
-    objective = qoc.Objective(initial=U_0, target=U_targ, H=H_qoc)
+    psi1_init = qt.basis(N, 1)
+    psi1_targ = qt.basis(N, 0)
+
+# Create an objective for each computational state
+    obj_0 = qoc.Objective(initial=psi0_init, target=psi0_targ, H=H_qoc)
+    obj_1 = qoc.Objective(initial=psi1_init, target=psi1_targ, H=H_qoc) 
 
     # Provide the Gaussian guess instead of np.zeros
     control_parameters = {
@@ -84,7 +91,7 @@ for i in range(10):
     
     seeds.append(np.random.get_state())
     res_crab = qoc.optimize_pulses(
-        objectives=[objective],
+        objectives=[obj_0, obj_1],
         control_parameters=control_parameters,
         tlist=tlist,
         algorithm_kwargs={

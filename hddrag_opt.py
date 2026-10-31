@@ -59,16 +59,20 @@ def apply_hd_drag(I_t, dt, alpha, strength_i, strength_q):
 # =====================================================================
 
 N = 5                   # Truncate transmon to 5 levels: |0>, |1>, |2>, |3>, |4> because 3rd order HD-DRAG
-gate_time = 20.0        # ns
-num_points = 1000       # AWG sample points
+gate_time = 10.0        # ns
+num_points = int(2*gate_time + 1)       # AWG sample points
 tlist = np.linspace(0, gate_time, num_points)
 dt = tlist[1] - tlist[0]
 
-# Frequencies (Angular = 2 * pi * GHz = rad/ns)
-# Note: Anharmonicity is usually negative (~ -300 MHz)
+# Frequencies 
 qubit_freq_Hz = 5.1e9
-alpha_ghz = -0.300
-alpha = 2 * np.pi * alpha_ghz  
+alpha_ghz = -0.30335 # Hard-coded for E_J/E_C = 50
+beta_ghz  = -0.03559
+gamma_ghz = -0.07155
+
+alpha = 2 * np.pi * alpha_ghz
+beta  = 2 * np.pi * beta_ghz
+gamma = 2 * np.pi * gamma_ghz
 
 # Noise Parameters
 T_eff = 0.050 # Effective temperature (K)
@@ -98,8 +102,8 @@ elif PULSE_SHAPE == 'slepian':
     base_I = generate_slepian(tlist, NW=4, target_area=np.pi)
 
 results = np.array([]).reshape(0, 5)  # Store results for different DRAG strengths
-for i in range(0, 101): # Already accounts for the non-DRAG case (i=0)
-    for q in range(0, 101):
+for i in range(-50, 51): # Already accounts for the non-DRAG case (i=0)
+    for q in range(-50, 51):
         I_t, Q_t = apply_hd_drag(base_I, dt, alpha=alpha, strength_i=i*0.01, strength_q=q*0.01)
         # =====================================================================
         # 4. QuTiP Setup
@@ -120,7 +124,11 @@ for i in range(0, 101): # Already accounts for the non-DRAG case (i=0)
         # 4a. Hamiltonians
         # Drift Hamiltonian: Transmon Anharmonicity
         # H_drift = (alpha / 2) * a^dag * a^dag * a * a
-        H_drift = 0.5 * alpha * ad * ad * a * a
+        H_drift = (
+            (alpha / 2.0)   * ad**2 * a**2 +
+            (beta / 6.0)    * ad**3 * a**3 +
+            (gamma / 24.0)  * ad**4 * a**4
+        )
 
         # Drive Operators
         H_I = 0.5 * (a + ad)
